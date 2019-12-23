@@ -76,6 +76,10 @@ def yield_images_from_dir(img_dir):
             yield cv2.resize(img, (int(w * r), int(h * r))), img_path.name
 
 
+def Model():
+    return get_model(model_name=cfg.MODEL.ARCH, pretrained=None)
+
+
 def main():
     args = get_args()
 
@@ -163,7 +167,7 @@ def main():
                 cv2.imwrite(str(output_path), img)
             else:
                 cv2.imshow("result", img)
-                key = cv2.waitKey(-1) if img_dir else cv2.waitKey(30)
+                key = cv2.waitKey(-1) if img_dir else cv2.waitKey(1)
 
                 if key == 27:  # ESC
                     break
