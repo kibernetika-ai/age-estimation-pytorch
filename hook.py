@@ -19,8 +19,7 @@ def process(inputs, ctx, **kwargs):
     font = cv2.FONT_HERSHEY_SIMPLEX
     for box in boxes:
         box = box.astype(int)
-        margin = int(((box[2] - box[0]) / 2 + (box[3] - box[1]) / 2) * 0.4)
-        img = crop_by_box(image, box, margin=margin)
+        img = crop_by_box(image, box, margin=0.4)
         img = cv2.resize(img, (224, 224), interpolation=cv2.INTER_LINEAR)
 
         prepared = img.transpose([2, 0, 1])
@@ -28,6 +27,14 @@ def process(inputs, ctx, **kwargs):
         outputs = age_driver.predict({'input.1': prepared.astype(np.float)})
         output = special.softmax(list(outputs.values())[0])
         predicted_ages = (output * idx_tensor).sum(axis=-1)
+        cv2.rectangle(
+            image,
+            (box[0], box[1]),
+            (box[2], box[3]),
+            color=(250, 0, 0),
+            thickness=2,
+            lineType=cv2.LINE_AA,
+        )
         cv2.putText(
             image,
             str(int(round(predicted_ages[0]))),
