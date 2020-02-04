@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import pretrainedmodels
 import pretrainedmodels.utils
 from model import get_model
-from dataset import FaceDataset
+from dataset import FaceDatasets
 from defaults import _C as cfg
 from train import validate
 
@@ -58,7 +58,7 @@ def main():
     if device == "cuda":
         cudnn.benchmark = True
 
-    test_dataset = FaceDataset(args.data_dir, "test", img_size=cfg.MODEL.IMG_SIZE, augment=False)
+    test_dataset = FaceDatasets(args.data_dir, "test", img_size=cfg.MODEL.IMG_SIZE, augment=False)
     test_loader = DataLoader(test_dataset, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False,
                              num_workers=cfg.TRAIN.WORKERS, drop_last=False)
 

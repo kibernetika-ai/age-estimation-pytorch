@@ -29,7 +29,9 @@ def get_args():
                          and callable(pretrainedmodels.__dict__[name]))
     parser = argparse.ArgumentParser(description=f"available models: {model_names}",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--data_dir", type=str, required=True, help="Data root directory")
+    parser.add_argument("--limit", type=int, default=0, help="Limit steps")
+    parser.add_argument("--utk-dir", type=str, required=True, help="UTK Data root directory")
+    parser.add_argument("--appa-real-dir", type=str, required=True, help="APPA-REAL Data root directory")
     parser.add_argument("--resume", type=str, default=None, help="Resume from checkpoint if any")
     parser.add_argument("--checkpoint", type=str, default="checkpoint", help="Checkpoint directory")
     parser.add_argument("--tensorboard", type=str, default=None, help="Tensorboard log directory")
@@ -183,17 +185,37 @@ def main():
         cudnn.benchmark = True
 
     criterion = nn.CrossEntropyLoss().to(device)
-    train_dataset = FaceDatasets(args.data_dir, "train", img_size=cfg.MODEL.IMG_SIZE, augment=True,
-                                 age_stddev=cfg.TRAIN.AGE_STDDEV)
-    train_loader = DataLoader(train_dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=True,
-                              num_workers=cfg.TRAIN.WORKERS, drop_last=True)
+    train_dataset = FaceDatasets(
+        args.appa_real_dir,
+        args.utk_dir,
+        "train",
+        img_size=cfg.MODEL.IMG_SIZE,
+        augment=True,
+        age_stddev=cfg.TRAIN.AGE_STDDEV
+    )
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=cfg.TRAIN.BATCH_SIZE,
+        shuffle=True,
+        num_workers=cfg.TRAIN.WORKERS,
+        drop_last=True
+    )
 
-    val_dataset = FaceDatasets(args.data_dir, "valid", img_size=cfg.MODEL.IMG_SIZE, augment=False)
-    val_loader = DataLoader(val_dataset, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False,
-                            num_workers=cfg.TRAIN.WORKERS, drop_last=False)
+    val_dataset = FaceDatasets(
+        args.appa_real_dir,
+        None,
+        "valid",
+        img_size=cfg.MODEL.IMG_SIZE, augment=False
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False,
+        num_workers=cfg.TRAIN.WORKERS, drop_last=False
+    )
 
-    scheduler = StepLR(optimizer, step_size=cfg.TRAIN.LR_DECAY_STEP, gamma=cfg.TRAIN.LR_DECAY_RATE,
-                       last_epoch=start_epoch - 1)
+    scheduler = StepLR(
+        optimizer, step_size=cfg.TRAIN.LR_DECAY_STEP, gamma=cfg.TRAIN.LR_DECAY_RATE,
+        last_epoch=start_epoch - 1
+    )
     best_val_mae = 10000.0
     train_writer = None
 

@@ -1,4 +1,6 @@
 import argparse
+import os
+
 import better_exceptions
 from pathlib import Path
 import numpy as np
@@ -14,10 +16,10 @@ class ImgAugTransform:
         self.aug = iaa.Sequential([
             iaa.OneOf([
                 iaa.Sometimes(0.25, iaa.AdditiveGaussianNoise(scale=0.1 * 255)),
-                iaa.Sometimes(0.25, iaa.GaussianBlur(sigma=(0, 3.0)))
+                iaa.Sometimes(0.25, iaa.GaussianBlur(sigma=(0, 2.0)))
                 ]),
             iaa.Affine(
-                rotate=(-20, 20), mode="edge",
+                rotate=(-10, 10), mode="edge",
                 scale={"x": (0.95, 1.05), "y": (0.95, 1.05)},
                 translate_percent={"x": (-0.05, 0.05), "y": (-0.05, 0.05)}
             ),
@@ -32,14 +34,19 @@ class ImgAugTransform:
         return img
 
 
-class FaceDataset(Dataset):
-    def __init__(self, data_dir, data_type, img_size=224, augment=False, age_stddev=1.0):
+class FaceDatasets(Dataset):
+    def __init__(self, appa_real_dir, utk_dir, data_type, img_size=224, augment=False, age_stddev=1.0):
         assert(data_type in ("train", "valid", "test"))
-        csv_path = Path(data_dir).joinpath(f"gt_avg_{data_type}.csv")
-        img_dir = Path(data_dir).joinpath(data_type)
+        csv_path = Path(appa_real_dir).joinpath(f"gt_avg_{data_type}.csv")
+        img_dir = Path(appa_real_dir).joinpath(data_type)
         self.img_size = img_size
         self.augment = augment
         self.age_stddev = age_stddev
+
+        if utk_dir is not None:
+            self.utk = UTKFaceDataset(utk_dir)
+        else:
+            self.utk = None
 
         if augment:
             self.transform = ImgAugTransform()
@@ -65,15 +72,39 @@ class FaceDataset(Dataset):
             self.y.append(row["apparent_age_avg"])
             self.std.append(row["apparent_age_std"])
 
+        print(f'Full len: {self.__len__()}')
+        print(f'len x: {len(self.y)}')
+        if self.utk:
+            print(f'len utk: {len(self.utk.files)}')
+
     def __len__(self):
-        return len(self.y)
+        if self.utk:
+            return len(self.y) + len(self.utk.files)
+        else:
+            return len(self.y)
 
     def __getitem__(self, idx):
-        img_path = self.x[idx]
-        age = self.y[idx]
+        real_idx = idx // 2 + 1 if self.utk else idx
+        if idx % 2 == 0 or self.utk is None:
+            from_appa = True
+            if real_idx >= len(self.y):
+                from_appa = False
+        else:
+            from_appa = False
+            if real_idx >= len(self.utk.files):
+                from_appa = True
+
+        if from_appa:
+            print(f'got idx {idx}, len x={len(self.x)}, real_idx={real_idx}')
+            img_path = self.x[real_idx]
+            age = self.y[real_idx]
+        else:
+            img_path = self.utk.files[idx // 2 + 1]
+            age = self.utk.get_label(img_path)
 
         if self.augment:
-            age += np.random.randn() * self.std[idx] * self.age_stddev
+            if idx // 2 + 1 < len(self.std):
+                age += np.random.randn() * self.std[idx // 2 + 1] * self.age_stddev
 
         img = cv2.imread(str(img_path), 1)
         img = cv2.resize(img, (self.img_size, self.img_size))
@@ -81,15 +112,30 @@ class FaceDataset(Dataset):
         return torch.from_numpy(np.transpose(img, (2, 0, 1))), np.clip(round(age), 0, 100)
 
 
+class UTKFaceDataset(object):
+    def __init__(self, data_dir):
+        self.data_dir = data_dir
+        files = []
+        for base in os.listdir(self.data_dir):
+            files.append(os.path.join(self.data_dir, base))
+
+        self.files = files
+
+    def get_label(self, file_name):
+        base_name = os.path.basename(file_name)
+        return int(base_name.split('_')[0])
+
+
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--data_dir", type=str, required=True)
+    parser.add_argument("--appa_real_dir", type=str, required=True)
+    parser.add_argument("--utk_dir", type=str, required=True)
     args = parser.parse_args()
-    dataset = FaceDataset(args.data_dir, "train")
+    dataset = FaceDatasets(args.appa_real_dir, args.utk_dir, "train")
     print("train dataset len: {}".format(len(dataset)))
-    dataset = FaceDataset(args.data_dir, "valid")
+    dataset = FaceDatasets(args.appa_real_dir, args.utk_dir, "valid")
     print("valid dataset len: {}".format(len(dataset)))
-    dataset = FaceDataset(args.data_dir, "test")
+    dataset = FaceDatasets(args.appa_real_dir, args.utk_dir, "test")
     print("test dataset len: {}".format(len(dataset)))
 
 
