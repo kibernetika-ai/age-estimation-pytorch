@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 import better_exceptions
 from pathlib import Path
@@ -72,11 +73,6 @@ class FaceDatasets(Dataset):
             self.y.append(row["apparent_age_avg"])
             self.std.append(row["apparent_age_std"])
 
-        print(f'Full len: {self.__len__()}')
-        print(f'len x: {len(self.y)}')
-        if self.utk:
-            print(f'len utk: {len(self.utk.files)}')
-
     def __len__(self):
         if self.utk:
             return len(self.y) + len(self.utk.files)
@@ -95,7 +91,6 @@ class FaceDatasets(Dataset):
                 from_appa = True
 
         if from_appa:
-            print(f'got idx {idx}, len x={len(self.x)}, real_idx={real_idx}')
             img_path = self.x[real_idx]
             age = self.y[real_idx]
         else:
@@ -106,7 +101,8 @@ class FaceDatasets(Dataset):
             if idx // 2 + 1 < len(self.std):
                 age += np.random.randn() * self.std[idx // 2 + 1] * self.age_stddev
 
-        img = cv2.imread(str(img_path), 1)
+        img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+        sys.stdout.flush()
         img = cv2.resize(img, (self.img_size, self.img_size))
         img = self.transform(img).astype(np.float32)
         return torch.from_numpy(np.transpose(img, (2, 0, 1))), np.clip(round(age), 0, 100)
