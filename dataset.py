@@ -20,7 +20,7 @@ class ImgAugTransform:
                 iaa.Sometimes(0.25, iaa.GaussianBlur(sigma=(0, 2.0)))
                 ]),
             iaa.Affine(
-                rotate=(-10, 10), mode="edge",
+                rotate=(-5, 5), mode="edge",
                 scale={"x": (0.95, 1.05), "y": (0.95, 1.05)},
                 translate_percent={"x": (-0.05, 0.05), "y": (-0.05, 0.05)}
             ),

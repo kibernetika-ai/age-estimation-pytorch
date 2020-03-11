@@ -18,7 +18,6 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from dataset import FaceDatasets
-from defaults import _C as cfg
 from model import get_model
 
 
@@ -30,14 +29,22 @@ def get_args():
     parser = argparse.ArgumentParser(description=f"available models: {model_names}",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--limit", type=int, default=0, help="Limit steps")
-    parser.add_argument("--utk-dir", type=str, required=True, help="UTK Data root directory")
+    parser.add_argument("--utk-dir", type=str, required=False, help="UTK Data root directory")
     parser.add_argument("--appa-real-dir", type=str, required=True, help="APPA-REAL Data root directory")
     parser.add_argument("--resume", type=str, default=None, help="Resume from checkpoint if any")
     parser.add_argument("--checkpoint", type=str, default="checkpoint", help="Checkpoint directory")
     parser.add_argument("--tensorboard", type=str, default=None, help="Tensorboard log directory")
     parser.add_argument('--multi_gpu', action="store_true", help="Use multi GPUs (data parallel)")
-    parser.add_argument("opts", default=[], nargs=argparse.REMAINDER,
-                        help="Modify config options using the command-line")
+
+    parser.add_argument("--lr", type=float, default=0.1)
+    parser.add_argument("--opt", default="adam")  # adam or sgd)
+    parser.add_argument("--lr_decay_step", type=float, default=5)
+    parser.add_argument("--lr_decay_rate", type=float, default=0.5)
+    parser.add_argument("--weight_decay", type=float, default=0.0)
+    parser.add_argument("--age_stddev", type=float, default=1.0)
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--arch", default="se_resnext50_32x4d")
+    parser.add_argument("--img_size", type=int, default=224)
     args = parser.parse_args()
     return args
 
@@ -141,24 +148,20 @@ def validate(validate_loader, model, criterion, epoch, device):
 def main():
     args = get_args()
 
-    if args.opts:
-        cfg.merge_from_list(args.opts)
-
-    cfg.freeze()
     start_epoch = 0
     checkpoint_dir = Path(args.checkpoint)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # create model
-    print("=> creating model '{}'".format(cfg.MODEL.ARCH))
-    model = get_model(model_name=cfg.MODEL.ARCH)
+    print("=> creating model '{}'".format(args.arch))
+    model = get_model(model_name=args.arch)
 
-    if cfg.TRAIN.OPT == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr=cfg.TRAIN.LR,
-                                    momentum=cfg.TRAIN.MOMENTUM,
-                                    weight_decay=cfg.TRAIN.WEIGHT_DECAY)
+    if args.opt == "sgd":
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr,
+                                    momentum=args.momentum,
+                                    weight_decay=args.weight_decay)
     else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=cfg.TRAIN.LR)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
@@ -189,15 +192,15 @@ def main():
         args.appa_real_dir,
         args.utk_dir,
         "train",
-        img_size=cfg.MODEL.IMG_SIZE,
+        img_size=args.img_size,
         augment=True,
-        age_stddev=cfg.TRAIN.AGE_STDDEV
+        age_stddev=args.age_stddev
     )
     train_loader = DataLoader(
         train_dataset,
-        batch_size=cfg.TRAIN.BATCH_SIZE,
+        batch_size=args.batch_size,
         shuffle=True,
-        num_workers=cfg.TRAIN.WORKERS,
+        num_workers=args.workers,
         drop_last=True
     )
 
@@ -205,26 +208,25 @@ def main():
         args.appa_real_dir,
         None,
         "valid",
-        img_size=cfg.MODEL.IMG_SIZE, augment=False
+        img_size=args.img_size, augment=False
     )
     val_loader = DataLoader(
-        val_dataset, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False,
-        num_workers=cfg.TRAIN.WORKERS, drop_last=False
+        val_dataset, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.workers, drop_last=False
     )
 
     scheduler = StepLR(
-        optimizer, step_size=cfg.TRAIN.LR_DECAY_STEP, gamma=cfg.TRAIN.LR_DECAY_RATE,
+        optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_rate,
         last_epoch=start_epoch - 1
     )
     best_val_mae = 10000.0
     train_writer = None
 
     if args.tensorboard is not None:
-        opts_prefix = "_".join(args.opts)
-        train_writer = SummaryWriter(log_dir=args.tensorboard + "/" + opts_prefix + "_train")
-        val_writer = SummaryWriter(log_dir=args.tensorboard + "/" + opts_prefix + "_val")
+        train_writer = SummaryWriter(log_dir=args.tensorboard + "/" + "_train")
+        val_writer = SummaryWriter(log_dir=args.tensorboard + "/" + "_val")
 
-    for epoch in range(start_epoch, cfg.TRAIN.EPOCHS):
+    for epoch in range(start_epoch, args.epochs):
         # train
         train_loss, train_acc = train(train_loader, model, criterion, optimizer, epoch, device)
 
@@ -245,7 +247,7 @@ def main():
             torch.save(
                 {
                     'epoch': epoch + 1,
-                    'arch': cfg.MODEL.ARCH,
+                    'arch': args.arch,
                     'state_dict': model_state_dict,
                     'optimizer_state_dict': optimizer.state_dict()
                 },
@@ -256,10 +258,9 @@ def main():
             print(f"=> [epoch {epoch:03d}] best val mae was not improved from {best_val_mae:.3f} ({val_mae:.3f})")
 
         # adjust learning rate
-        scheduler.step()
+        scheduler.step(epoch=epoch)
 
     print("=> training finished")
-    print(f"additional opts: {args.opts}")
     print(f"best val mae: {best_val_mae:.3f}")
 
 
