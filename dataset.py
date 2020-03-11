@@ -38,8 +38,11 @@ class ImgAugTransform:
 class FaceDatasets(Dataset):
     def __init__(self, appa_real_dir, utk_dir, data_type, img_size=224, augment=False, age_stddev=1.0):
         assert(data_type in ("train", "valid", "test"))
-        csv_path = Path(appa_real_dir).joinpath(f"gt_avg_{data_type}.csv")
-        img_dir = Path(appa_real_dir).joinpath(data_type)
+        self.appa = appa_real_dir
+        if self.appa is not None:
+            csv_path = Path(appa_real_dir).joinpath(f"gt_avg_{data_type}.csv")
+            img_dir = Path(appa_real_dir).joinpath(data_type)
+
         self.img_size = img_size
         self.augment = augment
         self.age_stddev = age_stddev
@@ -57,21 +60,22 @@ class FaceDatasets(Dataset):
         self.x = []
         self.y = []
         self.std = []
-        df = pd.read_csv(str(csv_path))
-        ignore_path = Path(__file__).resolve().parent.joinpath("ignore_list.csv")
-        ignore_img_names = list(pd.read_csv(str(ignore_path))["img_name"].values)
+        if self.appa is not None:
+            df = pd.read_csv(str(csv_path))
+            ignore_path = Path(__file__).resolve().parent.joinpath("ignore_list.csv")
+            ignore_img_names = list(pd.read_csv(str(ignore_path))["img_name"].values)
 
-        for _, row in df.iterrows():
-            img_name = row["file_name"]
+            for _, row in df.iterrows():
+                img_name = row["file_name"]
 
-            if img_name in ignore_img_names:
-                continue
+                if img_name in ignore_img_names:
+                    continue
 
-            img_path = img_dir.joinpath(img_name + "_face.jpg")
-            assert(img_path.is_file())
-            self.x.append(str(img_path))
-            self.y.append(row["apparent_age_avg"])
-            self.std.append(row["apparent_age_std"])
+                img_path = img_dir.joinpath(img_name + "_face.jpg")
+                assert(img_path.is_file())
+                self.x.append(str(img_path))
+                self.y.append(row["apparent_age_avg"])
+                self.std.append(row["apparent_age_std"])
 
     def __len__(self):
         if self.utk:
@@ -102,7 +106,6 @@ class FaceDatasets(Dataset):
                 age += np.random.randn() * self.std[idx // 2 + 1] * self.age_stddev
 
         img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
-        sys.stdout.flush()
         img = cv2.resize(img, (self.img_size, self.img_size))
         img = self.transform(img).astype(np.float32)
         return torch.from_numpy(np.transpose(img, (2, 0, 1))), np.clip(round(age), 0, 100)

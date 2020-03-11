@@ -1,6 +1,7 @@
 import argparse
 from collections import OrderedDict
 from pathlib import Path
+import sys
 
 import numpy as np
 import pretrainedmodels
@@ -21,6 +22,11 @@ from dataset import FaceDatasets
 from model import get_model
 
 
+def print_fun(s):
+    print(s)
+    sys.stdout.flush()
+
+
 def get_args():
     model_names = sorted(name for name in pretrainedmodels.__dict__
                          if not name.startswith("__")
@@ -30,17 +36,21 @@ def get_args():
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--limit", type=int, default=0, help="Limit steps")
     parser.add_argument("--utk-dir", type=str, required=False, help="UTK Data root directory")
-    parser.add_argument("--appa-real-dir", type=str, required=True, help="APPA-REAL Data root directory")
+    parser.add_argument("--appa-real-dir", type=str, required=False, help="APPA-REAL Data root directory")
     parser.add_argument("--resume", type=str, default=None, help="Resume from checkpoint if any")
     parser.add_argument("--checkpoint", type=str, default="checkpoint", help="Checkpoint directory")
     parser.add_argument("--tensorboard", type=str, default=None, help="Tensorboard log directory")
     parser.add_argument('--multi_gpu', action="store_true", help="Use multi GPUs (data parallel)")
+    parser.add_argument("--aug", action='store_true', default=False)
 
     parser.add_argument("--lr", type=float, default=0.1)
     parser.add_argument("--opt", default="adam")  # adam or sgd)
+    parser.add_argument("--workers", default=4, type=int)
     parser.add_argument("--lr_decay_step", type=float, default=5)
     parser.add_argument("--lr_decay_rate", type=float, default=0.5)
+    parser.add_argument("--momentum", type=float, default=0.5)
     parser.add_argument("--weight_decay", type=float, default=0.0)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--age_stddev", type=float, default=1.0)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--arch", default="se_resnext50_32x4d")
@@ -68,8 +78,8 @@ def train(train_loader, model, criterion, optimizer, epoch, device):
     loss_monitor = AverageMeter()
     accuracy_monitor = AverageMeter()
 
-    with tqdm(train_loader) as _tqdm:
-        for x, y in _tqdm:
+    with tqdm(train_loader, disable=None) as _tqdm:
+        for i, (x, y) in enumerate(_tqdm):
             x = x.to(device)
             y = y.to(device)
 
@@ -94,8 +104,19 @@ def train(train_loader, model, criterion, optimizer, epoch, device):
             loss.backward()
             optimizer.step()
 
-            _tqdm.set_postfix(OrderedDict(stage="train", epoch=epoch, loss=loss_monitor.avg),
-                              acc=accuracy_monitor.avg, correct=correct_num, sample_num=sample_num)
+            data = OrderedDict(
+                stage="train",
+                epoch=epoch,
+                loss=loss_monitor.avg,
+                acc=accuracy_monitor.avg,
+                correct=correct_num,
+                sample_num=sample_num
+            )
+            _tqdm.set_postfix(data)
+            if _tqdm.disable and i % 10 == 0:
+                data_str = ', '.join([f'{k}={v}' for k, v in data.items()])
+                msg = f'Step {i}/{len(train_loader)} [{data_str}]'
+                print_fun(msg)
 
     return loss_monitor.avg, accuracy_monitor.avg
 
@@ -108,7 +129,7 @@ def validate(validate_loader, model, criterion, epoch, device):
     gt = []
 
     with torch.no_grad():
-        with tqdm(validate_loader) as _tqdm:
+        with tqdm(validate_loader, disable=None) as _tqdm:
             for i, (x, y) in enumerate(_tqdm):
                 x = x.to(device)
                 y = y.to(device)
@@ -132,8 +153,15 @@ def validate(validate_loader, model, criterion, epoch, device):
                     sample_num = x.size(0)
                     loss_monitor.update(cur_loss, sample_num)
                     accuracy_monitor.update(correct_num, sample_num)
-                    _tqdm.set_postfix(OrderedDict(stage="val", epoch=epoch, loss=loss_monitor.avg),
-                                      acc=accuracy_monitor.avg, correct=correct_num, sample_num=sample_num)
+                    data = OrderedDict(
+                        stage="val", epoch=epoch, loss=loss_monitor.avg,
+                        acc=accuracy_monitor.avg, correct=correct_num, sample_num=sample_num
+                    )
+                    _tqdm.set_postfix(data)
+                    if _tqdm.disable and i % 10 == 0:
+                        data_str = ', '.join([f'{k}={v}' for k, v in data.items()])
+                        msg = f'Step {i}/{len(validate_loader)} [{data_str}]'
+                        print_fun(msg)
 
     preds = np.concatenate(preds, axis=0)
     gt = np.concatenate(gt, axis=0)
@@ -190,10 +218,11 @@ def main():
     criterion = nn.CrossEntropyLoss().to(device)
     train_dataset = FaceDatasets(
         args.appa_real_dir,
+        # None,
         args.utk_dir,
         "train",
         img_size=args.img_size,
-        augment=True,
+        augment=args.aug,
         age_stddev=args.age_stddev
     )
     train_loader = DataLoader(
